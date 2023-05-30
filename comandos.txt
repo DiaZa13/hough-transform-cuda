@@ -1,0 +1,9 @@
+C:\MinGW\bin
+
+nvcc -x cu houghBase.cu common/pgm.cpp -o hough -I /usr/local/include/opencv4 -lopencv_core -lopencv_imgproc -lopencv_highgui
+
+
+
+nvcc -std=c++11 -I /usr/local/include/opencv4 -o hough_transform main.cu -lcudart -lopencv_core -lopencv_imgproc -lopencv_highgui
+
+nvcc -std=c++11 -I /usr/local/include/opencv4 houghBase.cu common/pgm.cpp -o hough -lcudart -lopencv_core -lopencv_imgproc -lopencv_highgui -lopencv_imgcodecs
