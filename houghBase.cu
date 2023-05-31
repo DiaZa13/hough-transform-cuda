@@ -129,7 +129,11 @@ int main (int argc, char **argv)
   // Record the start event
   cudaEventRecord(start, NULL);
 
-  GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale);
+GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale);
+cudaDeviceSynchronize();
+cudaError_t err = cudaGetLastError();
+if (err != cudaSuccess)
+  printf("Error: %s\n", cudaGetErrorString(err));
   
   // Record the stop event
   cudaEventRecord(stop, NULL);
