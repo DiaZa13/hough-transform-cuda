@@ -14,7 +14,7 @@
 #include <algorithm>
 #include "opencv2/opencv.hpp"
 
-const int degree_increment = 2;
+const int degree_increment = 1;
 const int degree_bins = 180 / degree_increment;
 const int radio_bins = 100;
 const float radio_increment = degree_increment * M_PI / 180;
@@ -46,7 +46,13 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
 }
 
 __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center, unsigned char *pic, int w, int h, int *acc) {
+    __shared__ int local_acc[degree_bins * radio_bins];
+    memset(local_acc, 0, sizeof(int) * radio_bins * degree_bins);
+    __syncthreads();
+
     int global_id = blockDim.x * blockIdx.x + threadIdx.x;
+    int local_id = threadIdx.x;
+
     if (global_id >= w * h) return;
 
     int x = global_id % w - x_center;
@@ -57,10 +63,17 @@ __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, i
             float r = x * d_Cos[tIdx] + y * d_Sin[tIdx];
             int rIdx = round((r + radio_max) / radio_scale);
             if (rIdx >= 0 && rIdx < radio_bins) {
-                atomicAdd(acc + (rIdx * degree_bins + tIdx), 1);
+                atomicAdd(local_acc + (rIdx * degree_bins + tIdx), 1);
             }
         }
     }
+
+//  TODO sum of acc
+    __syncthreads();
+    for (int x = local_id; x < degree_bins * radio_bins; x+=blockDim.x){
+        atomicAdd(&acc[x], local_acc[x]);
+    }
+
 }
 
 double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
@@ -72,7 +85,28 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
     // return mean + 2 * stdev;
-    return 3800;
+    return 1400;
+}
+
+void draw_lines(int* h_hough, double threshold, int degree_bins, const int radio_bins, float radio_scale, float radio_max, float radio_increment, int w, int h, char **argv){
+    cv::Mat img = cv::imread(argv[1], cv::IMREAD_COLOR);
+
+    for (int i = 0; i < degree_bins * radio_bins; i++) {
+        if (h_hough[i] > threshold) {
+            float r = (i / degree_bins) * radio_scale - radio_max;
+            float theta = (i % degree_bins) * radio_increment;
+            float a = std::cos(theta), b = std::sin(theta);
+            int x0 = a * r + w / 2, y0 = b * r + h / 2;
+            cv::Point pt1, pt2;
+            pt1.x = cvRound(x0 + 1000 * (-b));
+            pt1.y = cvRound(y0 + 1000 * (a));
+            pt2.x = cvRound(x0 - 1000 * (-b));
+            pt2.y = cvRound(y0 - 1000 * (a));
+            cv::line(img, pt1, pt2, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+        }
+    }
+
+    cv::imwrite("outputs/output.png", img);
 }
 
 int main(int argc, char **argv) {
@@ -147,25 +181,7 @@ int main(int argc, char **argv) {
     double threshold = get_threshold(h_hough, degree_bins, radio_bins);
 
     // Draw the selected lines
-//    TODO check this
-    cv::Mat img = cv::imread(argv[1], cv::IMREAD_COLOR);
-
-    for (i = 0; i < degree_bins * radio_bins; i++) {
-        if (h_hough[i] > threshold) {
-            float r = (i / degree_bins) * radio_scale - radio_max;
-            float theta = (i % degree_bins) * radio_increment;
-            float a = std::cos(theta), b = std::sin(theta);
-            int x0 = a * r + w / 2, y0 = b * r + h / 2;
-            cv::Point pt1, pt2;
-            pt1.x = cvRound(x0 + 1000 * (-b));
-            pt1.y = cvRound(y0 + 1000 * (a));
-            pt2.x = cvRound(x0 - 1000 * (-b));
-            pt2.y = cvRound(y0 - 1000 * (a));
-            cv::line(img, pt1, pt2, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
-        }
-    }
-
-    cv::imwrite("outputs/output.png", img);
+    draw_lines(h_hough, threshold, degree_bins, radio_bins, radio_scale, radio_max, radio_increment, w, h, argv);
 
     // compare CPU and GPU results
     for (i = 0; i < degree_bins * radio_bins; i++) {

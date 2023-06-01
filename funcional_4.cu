@@ -144,6 +144,7 @@ int main (int argc, char **argv)
 
   GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
   
+  
   // Record the stop event
   cudaEventRecord(stop, NULL);
   
