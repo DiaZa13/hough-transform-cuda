@@ -20,6 +20,7 @@ const int radio_bins = 100;
 const float radio_increment = degree_increment * M_PI / 180;
 
 const int BLOCK_SIZE = 500;
+const int LINE_COLOR = 2;
 
 __constant__ float d_Cos[degree_bins];
 __constant__ float d_Sin[degree_bins];
@@ -31,7 +32,8 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
     for (int i = 0; i < w; i++)
         for (int j = 0; j < h; j++) {
             int idx = j * w + i;
-            if (pic[idx] > 0) {
+            //printf("%d \n",pic[idx]);
+            if (pic[idx] < LINE_COLOR) {
                 int x = i - x_center;
                 int y = y_center - j;
                 float theta = 0;
@@ -49,7 +51,6 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
 
 __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center, unsigned char *pic, int w, int h, int *acc) {
     __shared__ int local_acc[degree_bins * radio_bins];
-//    memset(local_acc, 0, sizeof(int) * radio_bins * degree_bins);
 
     int global_id = blockDim.x * blockIdx.x + threadIdx.x;
         int local_id = threadIdx.x;
@@ -67,7 +68,7 @@ __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, i
     int x = global_id % w - x_center;
     int y = y_center - global_id / w;
 
-    if (pic[global_id] > 0) {
+    if (pic[global_id] < LINE_COLOR) {
         for (int tIdx = 0; tIdx < degree_bins; tIdx++) {
             float r = x * d_Cos[tIdx] + y * d_Sin[tIdx];
             int rIdx = round((r + radio_max) / radio_scale);
@@ -94,8 +95,9 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double sq_sum = std::inner_product(h_hough, h_hough + degree_bins * radio_bins, h_hough, 0.0);
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
-     return mean + 2 * stdev;
-//    return 4000;
+     return mean + (stdev*2);
+//     return mean*6;
+    //return 1000;
 }
 
 void draw_lines(int* h_hough, double threshold, int degree_bins, const int radio_bins, float radio_scale, float radio_max, float radio_increment, int w, int h, char **argv){
@@ -103,16 +105,21 @@ void draw_lines(int* h_hough, double threshold, int degree_bins, const int radio
 
     for (int i = 0; i < degree_bins * radio_bins; i++) {
         if (h_hough[i] > threshold) {
-            float r = (i / degree_bins) * radio_scale - radio_max;
+            float r = (round(i / degree_bins)) * radio_scale - radio_max;
             float theta = (i % degree_bins) * radio_increment;
-            float a = std::cos(theta), b = std::sin(theta);
-            int x0 = a * r + w / 2, y0 = b * r + h / 2;
-            cv::Point pt1, pt2;
-            pt1.x = cvRound(x0 + 1000 * (-b));
-            pt1.y = cvRound(y0 + 1000 * (a));
-            pt2.x = cvRound(x0 - 1000 * (-b));
-            pt2.y = cvRound(y0 - 1000 * (a));
-            cv::line(img, pt1, pt2, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+
+            float cos_t = std::cos(theta);
+            float sin_t = std::sin(theta);
+
+            int x0 = r * cos_t + w / 2;
+            int y0 = r * sin_t + h / 2;
+            double alpha = 1000;
+
+            cv::Point pt1( cvRound(x0 + alpha*(-sin_t)), cvRound(y0 + alpha*cos_t));
+            cv::Point pt2( cvRound(x0 - alpha*(-sin_t)), cvRound(y0 - alpha*cos_t));
+            cv::line(img, pt1, pt2, cv::Scalar(0,0,255), 1, cv::LINE_4);
+
+
         }
     }
 
@@ -140,11 +147,11 @@ int main(int argc, char **argv) {
     //  pre-compute values to be stored
     float *h_Cos = (float *) malloc(sizeof(float) * degree_bins);
     float *h_Sin = (float *) malloc(sizeof(float) * degree_bins);
-    float rad = 0;
+    float theta = 0;
     for (i = 0; i < degree_bins; i++) {
-        h_Cos[i] = cos(rad);
-        h_Sin[i] = sin(rad);
-        rad += radio_increment;
+        theta = i * radio_increment;
+        h_Cos[i] = cos(theta);
+        h_Sin[i] = sin(theta);
     }
     cudaMemcpyToSymbol(d_Cos, h_Cos, sizeof(float) * degree_bins);
     cudaMemcpyToSymbol(d_Sin, h_Sin, sizeof(float) * degree_bins);
@@ -154,12 +161,20 @@ int main(int argc, char **argv) {
     int *d_hough, *h_hough;
 
     h_in = inImg.pixels;
+//
+//    for(int y = 0; y < h; y++) {
+//        for(int x = 0; x < w; x++) {
+//            printf("%d \n", h_in[y*w + x]);
+//        }
+//        printf("\n");
+//    }
     h_hough = (int *) malloc(degree_bins * radio_bins * sizeof(int));
 
     cudaMalloc((void **) &d_in, sizeof(unsigned char) * w * h);
     cudaMalloc((void **) &d_hough, sizeof(int) * degree_bins * radio_bins);
     cudaMemcpy(d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
     cudaMemset(d_hough, 0, sizeof(int) * degree_bins * radio_bins);
+
 
     int grid = ceil((w * h) * 1.0 / BLOCK_SIZE);
 
@@ -195,7 +210,7 @@ int main(int argc, char **argv) {
 
     // compare CPU and GPU results
     for (i = 0; i < degree_bins * radio_bins; i++) {
-        if (((cpuht[i] - h_hough[i])*(cpuht[i] - h_hough[i])) >(20*20))
+        if (cpuht[i] != h_hough[i])
             printf("Calculation mismatch at : %i %i %i\n", i, cpuht[i], h_hough[i]);
     }
     printf("Done!\n");
