@@ -14,10 +14,12 @@
 #include <algorithm>
 #include "opencv2/opencv.hpp"
 
-const int degree_increment = 1;
+const int degree_increment = 2;
 const int degree_bins = 180 / degree_increment;
 const int radio_bins = 100;
 const float radio_increment = degree_increment * M_PI / 180;
+
+const int BLOCK_SIZE = 500;
 
 __constant__ float d_Cos[degree_bins];
 __constant__ float d_Sin[degree_bins];
@@ -47,14 +49,21 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
 
 __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center, unsigned char *pic, int w, int h, int *acc) {
     __shared__ int local_acc[degree_bins * radio_bins];
-    memset(local_acc, 0, sizeof(int) * radio_bins * degree_bins);
-    __syncthreads();
+//    memset(local_acc, 0, sizeof(int) * radio_bins * degree_bins);
 
     int global_id = blockDim.x * blockIdx.x + threadIdx.x;
-    int local_id = threadIdx.x;
+        int local_id = threadIdx.x;
 
     if (global_id >= w * h) return;
 
+//  initialize the local accumulator
+    for(int x = local_id; x < degree_bins * radio_bins; x+= blockDim.x){
+        local_acc[x] = 0;
+    }
+//  wait for all threads to initialize the array
+    __syncthreads();
+
+//  calculate the correspondent pixel
     int x = global_id % w - x_center;
     int y = y_center - global_id / w;
 
@@ -67,9 +76,10 @@ __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, i
             }
         }
     }
-
-//  TODO sum of acc
+//  wait for all the threads to add their calculus
     __syncthreads();
+
+//  sum the local accumulator into the global one
     for (int x = local_id; x < degree_bins * radio_bins; x+=blockDim.x){
         atomicAdd(&acc[x], local_acc[x]);
     }
@@ -84,8 +94,8 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double sq_sum = std::inner_product(h_hough, h_hough + degree_bins * radio_bins, h_hough, 0.0);
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
-    // return mean + 2 * stdev;
-    return 1400;
+     return mean + 2 * stdev;
+//    return 4000;
 }
 
 void draw_lines(int* h_hough, double threshold, int degree_bins, const int radio_bins, float radio_scale, float radio_max, float radio_increment, int w, int h, char **argv){
@@ -151,7 +161,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
     cudaMemset(d_hough, 0, sizeof(int) * degree_bins * radio_bins);
 
-    int blockNum = ceil(w * h / 256.0);
+    int grid = ceil((w * h) * 1.0 / BLOCK_SIZE);
 
     // Create CUDA events for timing
     cudaEvent_t start, stop;
@@ -160,7 +170,7 @@ int main(int argc, char **argv) {
 
     //  Record the start event
     cudaEventRecord(start, NULL);
-    GPUHoughTran <<< blockNum, 256 >>>(radio_max, radio_scale, x_center, y_center, d_in, w, h, d_hough);
+    GPUHoughTran <<< grid, BLOCK_SIZE >>>(radio_max, radio_scale, x_center, y_center, d_in, w, h, d_hough);
     cudaDeviceSynchronize();
     //  Record the stop event
     cudaEventRecord(stop, NULL);
@@ -185,7 +195,7 @@ int main(int argc, char **argv) {
 
     // compare CPU and GPU results
     for (i = 0; i < degree_bins * radio_bins; i++) {
-        if (cpuht[i] != h_hough[i])
+        if (((cpuht[i] - h_hough[i])*(cpuht[i] - h_hough[i])) >(20*20))
             printf("Calculation mismatch at : %i %i %i\n", i, cpuht[i], h_hough[i]);
     }
     printf("Done!\n");

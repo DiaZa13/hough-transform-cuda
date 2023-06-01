@@ -72,7 +72,7 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
     // return mean + 2 * stdev;
-    return 3800;
+    return 5000;
 }
 
 int main(int argc, char **argv) {
