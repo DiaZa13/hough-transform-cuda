@@ -16,11 +16,12 @@
 
 const int degree_increment = 2;
 const int degree_bins = 180 / degree_increment;
-const int radio_bins = 100;
+const int radio_bins = 200;
 const float radio_increment = degree_increment * M_PI / 180;
 
 const int BLOCK_SIZE = 500;
-const int LINE_COLOR = 1;
+const int LINE_COLOR = 200;
+const int TREESHOLD = 2;
 
 __constant__ float d_Cos[degree_bins];
 __constant__ float d_Sin[degree_bins];
@@ -32,7 +33,7 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
     for (int i = 0; i < w; i++)
         for (int j = 0; j < h; j++) {
             int idx = j * w + i;
-            if (pic[idx] > LINE_COLOR) {
+            if (pic[idx] < LINE_COLOR) {
                 int x = i - x_center;
                 int y = y_center - j;
                 float theta = 0;
@@ -55,7 +56,7 @@ __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, i
     int x = global_id % w - x_center;
     int y = y_center - global_id / w;
 
-    if (pic[global_id] > LINE_COLOR) {
+    if (pic[global_id] < LINE_COLOR) {
         for (int tIdx = 0; tIdx < degree_bins; tIdx++) {
             float r = x * d_Cos[tIdx] + y * d_Sin[tIdx];
             int rIdx = round((r + radio_max) / radio_scale);
@@ -75,7 +76,7 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
     // return mean + 2 * stdev;
-    return mean + (stdev*2.8);
+    return mean + (stdev*TREESHOLD);
 }
 
 int main(int argc, char **argv) {

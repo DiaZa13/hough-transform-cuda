@@ -30,6 +30,7 @@ const int rBins = 100;
 const float radInc = degreeInc * M_PI / 180;
 const int BLOCK_SIZE = 500;
 const int LINE_COLOR = 1;
+const int TREESHOLD = 2.8;
 //*****************************************************************
 // The CPU function returns a pointer to the accummulator
 void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
@@ -83,6 +84,18 @@ __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float
     }
 }
 
+double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
+    // avg of weights
+    double sum = std::accumulate(h_hough, h_hough + degree_bins * radio_bins, 0);
+    double mean = sum / (degree_bins * radio_bins);
+    // std of weights
+    double sq_sum = std::inner_product(h_hough, h_hough + degree_bins * radio_bins, h_hough, 0.0);
+    double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
+    // El threshold = avg + 2 * desviación estándar
+    return mean + (stdev*TREESHOLD);
+//     return mean*6;
+    //return 1000;
+}
 
 int main (int argc, char **argv)
 {
@@ -169,7 +182,7 @@ int main (int argc, char **argv)
   double stdev = std::sqrt(sq_sum / (degreeBins * rBins) - mean * mean);
 
   // El threshold será el promedio + 2 * desviación estándar
-  double threshold = mean + 2.8 * stdev;
+    double threshold = get_threshold(h_hough, degreeBins, rBins);
 
   // Dibuja las líneas cuyo peso es mayor que el threshold
   cv::Mat img = cv::imread(argv[1], cv::IMREAD_COLOR);

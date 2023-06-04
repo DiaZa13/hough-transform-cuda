@@ -21,6 +21,7 @@ const float radio_increment = degree_increment * M_PI / 180;
 
 const int BLOCK_SIZE = 500;
 const int LINE_COLOR = 1;
+const int TREESHOLD = 2;
 
 __constant__ float d_Cos[degree_bins];
 __constant__ float d_Sin[degree_bins];
@@ -98,7 +99,7 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double sq_sum = std::inner_product(h_hough, h_hough + degree_bins * radio_bins, h_hough, 0.0);
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
-     return mean + (stdev*2.8);
+     return mean + (stdev*TREESHOLD);
 //     return mean*6;
     //return 1000;
 }
