@@ -28,7 +28,8 @@ const int degreeInc = 2;
 const int degreeBins = 180 / degreeInc;
 const int rBins = 100;
 const float radInc = degreeInc * M_PI / 180;
-
+const int BLOCK_SIZE = 500;
+const int LINE_COLOR = 1;
 //*****************************************************************
 // The CPU function returns a pointer to the accummulator
 void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
@@ -44,7 +45,7 @@ void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
     for (int j = 0; j < h; j++)
       {
         int idx = j * w + i;
-        if (pic[idx] > 0)
+        if (pic[idx] > LINE_COLOR)
           {
             int xCoord = i - xCent;
             int yCoord = yCent - j;
@@ -71,7 +72,7 @@ __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float
   int xCoord = gloID % w - xCent;
   int yCoord = yCent - gloID / w;
 
-  if (pic[gloID] > 0)
+  if (pic[gloID] > LINE_COLOR)
     {
       for (int tIdx = 0; tIdx < degreeBins; tIdx++)
         {
@@ -132,7 +133,7 @@ int main (int argc, char **argv)
   cudaMemcpy (d_in, h_in, sizeof (unsigned char) * w * h, cudaMemcpyHostToDevice);
   cudaMemset (d_hough, 0, sizeof (int) * degreeBins * rBins);
 
-  int blockNum = ceil (w * h / 256.0);
+  int blockNum = ceil (w * h / BLOCK_SIZE);
   
   // Create CUDA events for timing
   cudaEvent_t start, stop;
@@ -142,8 +143,8 @@ int main (int argc, char **argv)
   // Record the start event
   cudaEventRecord(start, NULL);
 
-  GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
-  
+  GPU_HoughTran <<< blockNum, BLOCK_SIZE >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+  cudaDeviceSynchronize();
   
   // Record the stop event
   cudaEventRecord(stop, NULL);
@@ -168,7 +169,7 @@ int main (int argc, char **argv)
   double stdev = std::sqrt(sq_sum / (degreeBins * rBins) - mean * mean);
 
   // El threshold será el promedio + 2 * desviación estándar
-  double threshold = mean + 2 * stdev;
+  double threshold = mean + 2.8 * stdev;
 
   // Dibuja las líneas cuyo peso es mayor que el threshold
   cv::Mat img = cv::imread(argv[1], cv::IMREAD_COLOR);

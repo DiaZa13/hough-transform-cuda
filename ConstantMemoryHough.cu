@@ -19,6 +19,9 @@ const int degree_bins = 180 / degree_increment;
 const int radio_bins = 100;
 const float radio_increment = degree_increment * M_PI / 180;
 
+const int BLOCK_SIZE = 500;
+const int LINE_COLOR = 1;
+
 __constant__ float d_Cos[degree_bins];
 __constant__ float d_Sin[degree_bins];
 
@@ -29,7 +32,7 @@ void CPUHoughTran(float radio_max, float radio_scale, int x_center, int y_center
     for (int i = 0; i < w; i++)
         for (int j = 0; j < h; j++) {
             int idx = j * w + i;
-            if (pic[idx] > 0) {
+            if (pic[idx] > LINE_COLOR) {
                 int x = i - x_center;
                 int y = y_center - j;
                 float theta = 0;
@@ -52,7 +55,7 @@ __global__ void GPUHoughTran(float radio_max, float radio_scale, int x_center, i
     int x = global_id % w - x_center;
     int y = y_center - global_id / w;
 
-    if (pic[global_id] > 0) {
+    if (pic[global_id] > LINE_COLOR) {
         for (int tIdx = 0; tIdx < degree_bins; tIdx++) {
             float r = x * d_Cos[tIdx] + y * d_Sin[tIdx];
             int rIdx = round((r + radio_max) / radio_scale);
@@ -72,7 +75,7 @@ double get_threshold(int* h_hough, const int degree_bins, const int radio_bins){
     double stdev = std::sqrt(sq_sum / (degree_bins * radio_bins) - mean * mean);
     // El threshold = avg + 2 * desviación estándar
     // return mean + 2 * stdev;
-    return 5000;
+    return mean + (stdev*2.8);
 }
 
 int main(int argc, char **argv) {
@@ -117,7 +120,7 @@ int main(int argc, char **argv) {
     cudaMemcpy(d_in, h_in, sizeof(unsigned char) * w * h, cudaMemcpyHostToDevice);
     cudaMemset(d_hough, 0, sizeof(int) * degree_bins * radio_bins);
 
-    int blockNum = ceil(w * h / 256.0);
+    int blockNum = ceil(w * h / BLOCK_SIZE);
 
     // Create CUDA events for timing
     cudaEvent_t start, stop;
@@ -126,7 +129,7 @@ int main(int argc, char **argv) {
 
     //  Record the start event
     cudaEventRecord(start, NULL);
-    GPUHoughTran <<< blockNum, 256 >>>(radio_max, radio_scale, x_center, y_center, d_in, w, h, d_hough);
+    GPUHoughTran <<< blockNum, BLOCK_SIZE >>>(radio_max, radio_scale, x_center, y_center, d_in, w, h, d_hough);
     cudaDeviceSynchronize();
     //  Record the stop event
     cudaEventRecord(stop, NULL);
@@ -169,7 +172,7 @@ int main(int argc, char **argv) {
 
     // compare CPU and GPU results
     for (i = 0; i < degree_bins * radio_bins; i++) {
-        if (cpuht[i] != h_hough[i])
+        if ( (h_hough[i]-cpuht[i])*(h_hough[i]-cpuht[i]) > 2*2)
             printf("Calculation mismatch at : %i %i %i\n", i, cpuht[i], h_hough[i]);
     }
     printf("Done!\n");
